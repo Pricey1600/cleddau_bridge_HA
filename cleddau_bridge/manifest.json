@@ -6,6 +6,6 @@
   "requirements": [],
   "config_flow": true,
   "integration_type": "helper",
-  "documentation": "https://www.example.com",
-  "version": "0.1.0"
+  "documentation": "https://github.com/Pricey1600/cleddau_bridge_HA",
+  "version": "0.1.1"
 }
