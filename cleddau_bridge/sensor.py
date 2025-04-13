@@ -4,12 +4,22 @@ from __future__ import annotations
 
 from datetime import timedelta
 
-from homeassistant.components.sensor import SensorEntity
+from homeassistant.components.sensor import (
+    SensorEntity,
+    PLATFORM_SCHEMA,
+    SensorDeviceClass,
+    SensorStateClass,
+)
+from homeassistant.const import (
+    CONF_NAME,
+)
+import homeassistant.helpers.config_validation as cv
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.typing import ConfigType, DiscoveryInfoType
+import voluptuous as vol
 
-from .const import DEFAULT_SCAN_INTERVAL
+from .const import DEFAULT_SCAN_INTERVAL, DEFAULT_ICON, DEFAULT_NAME
 from .poll_bridge import api_polling
 
 SCAN_INTERVAL = timedelta(minutes=DEFAULT_SCAN_INTERVAL)
@@ -28,10 +38,6 @@ def setup_platform(
 class BridgeSensor(SensorEntity):
     """Representation of a Sensor."""
 
-    _attr_name = "Bridge Status"
-    # _attr_native_unit_of_measurement = UnitOfTemperature.CELSIUS
-    # _attr_device_class = SensorDeviceClass.TEMPERATURE
-    # _attr_state_class = SensorStateClass.MEASUREMENT
     _state = api_polling.check_status()[1]
 
     def update(self) -> None:
@@ -47,5 +53,22 @@ class BridgeSensor(SensorEntity):
         """Return the unique ID of the sensor."""
         return "cleddauBridgeStatus"
 
+    @property
+    def name(self):
+        """Return the name of the sensor."""
+        return DEFAULT_NAME
 
-# print(poll_bridge.check_status()[1])
+    @property
+    def icon(self):
+        """Icon to use in the frontend, if any."""
+        return DEFAULT_ICON
+
+    @property
+    def state_class(self):
+        """Return the state class."""
+        return SensorStateClass.MEASUREMENT
+
+    @property
+    def state(self):
+        """Return the state of the device."""
+        return self._state
