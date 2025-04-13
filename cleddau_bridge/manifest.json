@@ -1,0 +1,11 @@
+{
+  "domain": "cleddau_bridge",
+  "name": "Cleddau Bridge Status",
+  "codeowners": ["@Pricey1600"],
+  "iot_class": "cloud_polling",
+  "requirements": [],
+  "config_flow": true,
+  "integration_type": "helper",
+  "documentation": "https://www.example.com",
+  "version": "0.1.0"
+}
