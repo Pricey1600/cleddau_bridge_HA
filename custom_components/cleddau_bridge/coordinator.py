@@ -11,7 +11,11 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .const import DOMAIN, DEFAULT_SCAN_INTERVAL
-from .poll_bridge import async_get_bridge_status, CleddauBridgeApiError
+from .poll_bridge import (
+    async_get_bridge_status,
+    async_get_bridge_weather,
+    CleddauBridgeApiError,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -30,8 +34,14 @@ class CleddauBridgeCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._session = async_get_clientsession(hass)
 
     async def _async_update_data(self) -> dict[str, Any]:
-        """Fetch the latest bridge status from the API."""
+        """Fetch the latest bridge status and weather from the APIs."""
         try:
-            return await async_get_bridge_status(self._session)
+            data = await async_get_bridge_status(self._session)
         except CleddauBridgeApiError as err:
             raise UpdateFailed(str(err)) from err
+
+        weather = await async_get_bridge_weather(self._session)
+        if weather:
+            data.update(weather)
+
+        return data
