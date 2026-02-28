@@ -1,74 +1,57 @@
-"""Platform for sensor integration."""
+"""Sensor platform for Cleddau Bridge Status."""
 
 from __future__ import annotations
 
-from datetime import timedelta
+from typing import Any
 
-from homeassistant.components.sensor import (
-    SensorEntity,
-    PLATFORM_SCHEMA,
-    SensorDeviceClass,
-    SensorStateClass,
-)
-from homeassistant.const import (
-    CONF_NAME,
-)
-import homeassistant.helpers.config_validation as cv
+from homeassistant.components.sensor import SensorEntity
+from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from homeassistant.helpers.typing import ConfigType, DiscoveryInfoType
-import voluptuous as vol
+from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import DEFAULT_SCAN_INTERVAL, DEFAULT_ICON, DEFAULT_NAME
-from .poll_bridge import api_polling
-
-SCAN_INTERVAL = timedelta(minutes=DEFAULT_SCAN_INTERVAL)
+from .const import DEFAULT_ICON, DEFAULT_NAME, DOMAIN
+from .coordinator import CleddauBridgeCoordinator
 
 
-def setup_platform(
+async def async_setup_entry(
     hass: HomeAssistant,
-    config: ConfigType,
-    add_entities: AddEntitiesCallback,
-    discovery_info: DiscoveryInfoType | None = None,
+    entry: ConfigEntry,
+    async_add_entities: AddEntitiesCallback,
 ) -> None:
-    """Set up the sensor platform."""
-    add_entities([BridgeSensor()])
+    """Set up Cleddau Bridge sensor from a config entry."""
+    coordinator: CleddauBridgeCoordinator = hass.data[DOMAIN][entry.entry_id]
+    async_add_entities([CleddauBridgeSensor(coordinator, entry)])
 
 
-class BridgeSensor(SensorEntity):
-    """Representation of a Sensor."""
+class CleddauBridgeSensor(CoordinatorEntity[CleddauBridgeCoordinator], SensorEntity):
+    """Sensor showing the current status of the Cleddau Bridge."""
 
-    _state = api_polling.check_status()[1]
+    _attr_icon = DEFAULT_ICON
+    _attr_name = DEFAULT_NAME
 
-    def update(self) -> None:
-        """Fetch new state data for the sensor.
-
-        This is the only method that should fetch new data for Home Assistant.
-        """
-        # self._attr_native_value = poll_bridge.check_status()[1]
-        self._attr_native_value = self._state
-
-    @property
-    def unique_id(self) -> str:
-        """Return the unique ID of the sensor."""
-        return "cleddauBridgeStatus"
+    def __init__(
+        self,
+        coordinator: CleddauBridgeCoordinator,
+        entry: ConfigEntry,
+    ) -> None:
+        """Initialize the sensor."""
+        super().__init__(coordinator)
+        self._attr_unique_id = f"{entry.entry_id}_status"
 
     @property
-    def name(self):
-        """Return the name of the sensor."""
-        return DEFAULT_NAME
+    def native_value(self) -> str | None:
+        """Return the bridge status message."""
+        if self.coordinator.data is None:
+            return None
+        return self.coordinator.data.get("status_message")
 
     @property
-    def icon(self):
-        """Icon to use in the frontend, if any."""
-        return DEFAULT_ICON
-
-    @property
-    def state_class(self):
-        """Return the state class."""
-        return SensorStateClass.MEASUREMENT
-
-    @property
-    def state(self):
-        """Return the state of the device."""
-        return self._state
+    def extra_state_attributes(self) -> dict[str, Any] | None:
+        """Return additional state attributes."""
+        if self.coordinator.data is None:
+            return None
+        return {
+            "status_id": self.coordinator.data.get("status_id"),
+            "status_date": self.coordinator.data.get("status_date"),
+        }
