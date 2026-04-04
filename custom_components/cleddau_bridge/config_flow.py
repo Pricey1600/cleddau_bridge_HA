@@ -7,9 +7,13 @@ from typing import Any
 
 from homeassistant.config_entries import ConfigFlow
 from homeassistant.data_entry_flow import FlowResult
-from homeassistant.helpers.aiohttp_client import async_get_clientsession
+from homeassistant.helpers.aiohttp_client import async_create_clientsession
 
-from .const import DOMAIN
+from .const import (
+    AIOHTTP_MAX_FIELD_SIZE,
+    AIOHTTP_MAX_LINE_SIZE,
+    DOMAIN,
+)
 from .poll_bridge import async_get_bridge_status, CleddauBridgeApiError
 
 _LOGGER = logging.getLogger(__name__)
@@ -30,7 +34,12 @@ class CleddauBridgeConfigFlow(ConfigFlow, domain=DOMAIN):
         errors: dict[str, str] = {}
 
         if user_input is not None:
-            session = async_get_clientsession(self.hass)
+            session = async_create_clientsession(
+                self.hass,
+                auto_cleanup=False,
+                max_line_size=AIOHTTP_MAX_LINE_SIZE,
+                max_field_size=AIOHTTP_MAX_FIELD_SIZE,
+            )
             try:
                 await async_get_bridge_status(session)
             except CleddauBridgeApiError:
@@ -43,5 +52,7 @@ class CleddauBridgeConfigFlow(ConfigFlow, domain=DOMAIN):
                     title="Cleddau Bridge",
                     data={},
                 )
+            finally:
+                session.detach()
 
         return self.async_show_form(step_id="user", errors=errors)
