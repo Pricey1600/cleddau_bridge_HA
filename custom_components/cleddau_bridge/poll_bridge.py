@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
 from datetime import datetime, timezone
@@ -10,7 +11,13 @@ from typing import Any
 
 import aiohttp
 
-from .const import BRIDGE_API_URL, BRIDGE_PAGE_URL
+from .const import (
+    BRIDGE_API_URL,
+    BRIDGE_PAGE_URL,
+    REQUEST_TIMEOUT_SECONDS,
+    STATUS_FETCH_RETRIES,
+    STATUS_RETRY_BACKOFF_SECONDS,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -28,6 +35,45 @@ class CleddauBridgeApiError(Exception):
     """Raised when the Pembrokeshire Council bridge status request fails."""
 
 
+def _parse_bridge_status_html(html: str) -> dict[str, Any]:
+    """Parse bridge status from HTML body (raises ValueError if markup is wrong)."""
+    block_match = re.search(
+        r'<div[^>]*id="bridgeStatus"[^>]*>(.*?)</div>',
+        html,
+        flags=re.IGNORECASE | re.DOTALL,
+    )
+    if not block_match:
+        raise ValueError("bridgeStatus element not found")
+
+    block_html = block_match.group(1)
+
+    # Icon class includes "bridge green" or "bridge red"
+    color_match = re.search(
+        r'bridge\s+(green|red)',
+        block_html,
+        flags=re.IGNORECASE,
+    )
+    color = color_match.group(1).lower() if color_match else "unknown"
+    status_id = {"green": "open", "red": "restricted"}.get(color, "unknown")
+
+    # Extract title from <strong> tag
+    strong_match = re.search(r"<strong[^>]*>(.*?)</strong>", block_html, re.IGNORECASE | re.DOTALL)
+    status_title = unescape(strong_match.group(1).strip()) if strong_match else ""
+
+    # Rest of text (excluding strong) as status_message
+    block_without_strong = re.sub(r"<strong[^>]*>.*?</strong>", "", block_html, flags=re.IGNORECASE | re.DOTALL)
+    text = re.sub(r"<br\s*/?>", "\n", block_without_strong, flags=re.IGNORECASE)
+    text = re.sub(r"<[^>]+>", "", text)
+    status_message = unescape(" ".join(text.split())).strip()
+
+    return {
+        "status_id": status_id,
+        "status_title": status_title,
+        "status_message": status_message,
+        "status_date": datetime.now(timezone.utc).isoformat(),
+    }
+
+
 async def async_get_bridge_status(
     session: aiohttp.ClientSession,
 ) -> dict[str, Any]:
@@ -37,51 +83,36 @@ async def async_get_bridge_status(
     Returns a dict with keys: status_id, status_title, status_message, status_date.
     Raises CleddauBridgeApiError on any failure.
     """
-    try:
-        async with session.get(BRIDGE_PAGE_URL) as response:
-            response.raise_for_status()
-            html = await response.text()
+    timeout = aiohttp.ClientTimeout(total=REQUEST_TIMEOUT_SECONDS)
+    last_err: BaseException | None = None
 
-        block_match = re.search(
-            r'<div[^>]*id="bridgeStatus"[^>]*>(.*?)</div>',
-            html,
-            flags=re.IGNORECASE | re.DOTALL,
-        )
-        if not block_match:
-            raise ValueError("bridgeStatus element not found")
+    for attempt in range(STATUS_FETCH_RETRIES):
+        try:
+            async with session.get(BRIDGE_PAGE_URL, timeout=timeout) as response:
+                response.raise_for_status()
+                html = await response.text()
+            return _parse_bridge_status_html(html)
 
-        block_html = block_match.group(1)
+        except ValueError as err:
+            raise CleddauBridgeApiError(
+                f"Error fetching bridge status: {err}"
+            ) from err
+        except (aiohttp.ClientError, TimeoutError) as err:
+            last_err = err
+            if attempt < STATUS_FETCH_RETRIES - 1:
+                _LOGGER.warning(
+                    "Bridge status fetch attempt %s/%s failed: %s",
+                    attempt + 1,
+                    STATUS_FETCH_RETRIES,
+                    err,
+                )
+                await asyncio.sleep(STATUS_RETRY_BACKOFF_SECONDS * (2**attempt))
+            continue
 
-        # Icon class includes "bridge green" or "bridge red"
-        color_match = re.search(
-            r'bridge\s+(green|red)',
-            block_html,
-            flags=re.IGNORECASE,
-        )
-        color = color_match.group(1).lower() if color_match else "unknown"
-        status_id = {"green": "open", "red": "restricted"}.get(color, "unknown")
-
-        # Extract title from <strong> tag
-        strong_match = re.search(r"<strong[^>]*>(.*?)</strong>", block_html, re.IGNORECASE | re.DOTALL)
-        status_title = unescape(strong_match.group(1).strip()) if strong_match else ""
-
-        # Rest of text (excluding strong) as status_message
-        block_without_strong = re.sub(r"<strong[^>]*>.*?</strong>", "", block_html, flags=re.IGNORECASE | re.DOTALL)
-        text = re.sub(r"<br\s*/?>", "\n", block_without_strong, flags=re.IGNORECASE)
-        text = re.sub(r"<[^>]+>", "", text)
-        status_message = unescape(" ".join(text.split())).strip()
-
-        return {
-            "status_id": status_id,
-            "status_title": status_title,
-            "status_message": status_message,
-            "status_date": datetime.now(timezone.utc).isoformat(),
-        }
-
-    except (aiohttp.ClientError, ValueError) as err:
-        raise CleddauBridgeApiError(
-            f"Error fetching bridge status: {err}"
-        ) from err
+    assert last_err is not None
+    raise CleddauBridgeApiError(
+        f"Error fetching bridge status: {last_err}"
+    ) from last_err
 
 
 async def async_get_bridge_weather(
@@ -93,8 +124,9 @@ async def async_get_bridge_weather(
     Returns a dict with snake_case keys for the requested weather fields,
     or None if the request fails (non-fatal; status sensor can still work).
     """
+    timeout = aiohttp.ClientTimeout(total=REQUEST_TIMEOUT_SECONDS)
     try:
-        async with session.get(BRIDGE_API_URL) as response:
+        async with session.get(BRIDGE_API_URL, timeout=timeout) as response:
             response.raise_for_status()
             data = await response.json()
 
@@ -104,6 +136,6 @@ async def async_get_bridge_weather(
                 result[stored_key] = data[api_key]
         return result
 
-    except (aiohttp.ClientError, ValueError, KeyError) as err:
+    except (aiohttp.ClientError, ValueError, KeyError, TimeoutError) as err:
         _LOGGER.warning("Could not fetch bridge weather data: %s", err)
         return None

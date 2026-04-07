@@ -91,6 +91,11 @@ class CleddauBridgeStatusSensor(
         self._attr_unique_id = f"{entry.entry_id}_status"
 
     @property
+    def available(self) -> bool:
+        """Stay available with last-known data when a poll fails (HA default ties availability to last_update_success)."""
+        return self.coordinator.data is not None
+
+    @property
     def native_value(self) -> str | None:
         """Return the bridge status title (headline from strong tag)."""
         if self.coordinator.data is None:
@@ -129,6 +134,11 @@ class CleddauBridgeWeatherSensor(
         self._attr_native_unit_of_measurement = config.get("unit")
         self._attr_device_class = config.get("device_class")
         self._attr_state_class = config.get("state_class")
+
+    @property
+    def available(self) -> bool:
+        """Stay available with last-known data when a poll fails."""
+        return self.coordinator.data is not None
 
     @property
     def native_value(self) -> str | int | float | None:

@@ -17,6 +17,7 @@ from .const import (
     DEFAULT_SCAN_INTERVAL,
 )
 from .poll_bridge import (
+    BRIDGE_WEATHER_KEYS,
     async_get_bridge_status,
     async_get_bridge_weather,
     CleddauBridgeApiError,
@@ -52,5 +53,10 @@ class CleddauBridgeCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         weather = await async_get_bridge_weather(self._session)
         if weather:
             data.update(weather)
+        elif self.data:
+            # Keep last wind/temperature readings when the JSON API flakes; status still updates.
+            for key in BRIDGE_WEATHER_KEYS.values():
+                if key in self.data:
+                    data[key] = self.data[key]
 
         return data
